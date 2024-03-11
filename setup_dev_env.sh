@@ -43,11 +43,36 @@ EOF
 
 mkdir nginx
 cat <<EOF >nginx/default.conf
-# Nginx configuration content (unchanged)
+server {
+    listen 80;
+    listen [::]:80;
+    return 301 https://pyeditorial$request_uri;
+}
+
+server {
+	listen [::]:443 ssl ipv6only=on;
+	listen 443 ssl;
+	server_name pyeditorial;
+
+	ssl_certificate /etc/nginx/conf.d/cert.pem;
+    ssl_certificate_key /etc/nginx/conf.d/key.pem;
+
+	location = /favicon.ico { access_log off; log_not_found off; }
+
+	location / {
+		proxy_pass		http://web:8000;
+		proxy_redirect		off;
+
+		proxy_set_header 	Host $http_host;
+		proxy_set_header	X-Real-IP	$remote_addr;
+		proxy_set_header	X-Forwarded-For	$proxy_add_x_forwarded_for;
+		proxy_set_header	X-Forwarded-Proto	https;
+	}
+}
 EOF
 
-openssl req -x509 -newkey rsa:4096 -keyout nginx/key.pem -out nginx/cert.pem -days 365 -nodes -subj "/CN=localhost"
+openssl req -x509 -newkey rsa:4096 -keyout nginx/key.pem -out nginx/cert.pem -days 365 -nodes -subj "/CN=pyeditorial"
 
 docker-compose up -d
 
-echo "App is ready!! http://localhost to access."
+echo "App is ready!! https://localhost to access."
