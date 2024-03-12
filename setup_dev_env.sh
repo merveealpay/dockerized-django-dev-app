@@ -2,11 +2,11 @@
 
 git clone https://github.com/mavenium/PyEditorial.git pyeditorial_project
 cd pyeditorial_project
-
 sed -i '' 's/asgiref==3.3.1/asgiref>=3.3.2/' Dockerfile
-
 sed -i '' 's/asgiref==3.3.1/asgiref>=3.3.2/' requirements.txt
 echo "gunicorn" >> requirements.txt
+mkdir -p ./certbot/conf
+mkdir -p ./certbot/www
 
 cat << EOF > docker-compose.yml
 version: '3.6'
@@ -16,6 +16,8 @@ services:
       context: .
       dockerfile: Dockerfile
     command: gunicorn PyEditorial.wsgi:application -w 4 -b 0.0.0.0:8000
+    extra_hosts:
+      - "pyeditorial.local:127.0.0.1"
     volumes:
       - ./:/code
     ports:
@@ -32,47 +34,68 @@ services:
 
   nginx:
     image: nginx:latest
-    volumes:
-      - ./nginx:/etc/nginx/conf.d
+    extra_hosts:
+      - "pyeditorial.local:127.0.0.1"
     ports:
       - "80:80"
       - "443:443"
+    restart: always
+    volumes:
+      - ./certbot/conf:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot
     depends_on:
       - web
+
+  certbot:
+    image: certbot/certbot
+    restart: unless-stopped
+    volumes:
+      - ./certbot/conf:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot
+    depends_on:
+      - nginx
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
 EOF
 
 mkdir nginx
 cat <<EOF >nginx/default.conf
-server {
-    listen 80;
-    listen [::]:80;
-    return 301 https://pyeditorial$request_uri;
+upstream web {
+    server web:8000;
 }
 
-server {
-	listen [::]:443 ssl ipv6only=on;
-	listen 443 ssl;
-	server_name pyeditorial;
+    server {
 
-	ssl_certificate /etc/nginx/conf.d/cert.pem;
-    ssl_certificate_key /etc/nginx/conf.d/key.pem;
+        location / {
+            resolver 127.0.0.11;
+            proxy_pass http://web;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header Host $host;
+            proxy_redirect off;
+        }
 
-	location = /favicon.ico { access_log off; log_not_found off; }
+        location /static/ {
+            alias /static/;
+        }
+        location /media/ {
+            alias /media/;
+        }
 
-	location / {
-		proxy_pass		http://web:8000;
-		proxy_redirect		off;
+    listen 443 ssl;
+    ssl_certificate /etc/letsencrypt/live/pyeditorial.local/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/pyeditorial.local/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+}
 
-		proxy_set_header 	Host $http_host;
-		proxy_set_header	X-Real-IP	$remote_addr;
-		proxy_set_header	X-Forwarded-For	$proxy_add_x_forwarded_for;
-		proxy_set_header	X-Forwarded-Proto	https;
-	}
+  server {
+    if ($host = pyeditorial.local) {
+        return 301 https://$host$request_uri;
+    }
+
+        listen 80;
+        server_name pyeditorial.local;
+    return 404;
 }
 EOF
 
-openssl req -x509 -newkey rsa:4096 -keyout nginx/key.pem -out nginx/cert.pem -days 365 -nodes -subj "/CN=pyeditorial"
-
 docker-compose up -d
-
-echo "App is ready!! https://localhost to access."
