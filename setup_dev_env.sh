@@ -2,8 +2,19 @@
 
 git clone https://github.com/mavenium/PyEditorial.git pyeditorial_project
 cd pyeditorial_project
-sed -i '' 's/asgiref==3.3.1/asgiref>=3.3.2/' Dockerfile
-sed -i '' 's/asgiref==3.3.1/asgiref>=3.3.2/' requirements.txt
+
+# Update requirements
+function update_requirements() {
+    local file=$1
+    local old_version=$2
+    local new_version=$3
+
+    sed -i '' "s/${old_version}/${new_version}/" "${file}"
+}
+
+update_requirements "Dockerfile" "asgiref==3.3.1" "asgiref>=3.3.2"
+update_requirements "requirements.txt" "asgiref==3.3.1" "asgiref>=3.3.2"
+
 echo "gunicorn" >> requirements.txt
 mkdir -p ./certbot/conf
 mkdir -p ./certbot/www
@@ -45,16 +56,6 @@ services:
       - ./certbot/www:/var/www/certbot
     depends_on:
       - web
-
-  certbot:
-    image: certbot/certbot
-    restart: unless-stopped
-    volumes:
-      - ./certbot/conf:/etc/letsencrypt
-      - ./certbot/www:/var/www/certbot
-    depends_on:
-      - nginx
-    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
 EOF
 
 mkdir nginx
@@ -80,12 +81,6 @@ upstream web {
             alias /media/;
         }
 
-    listen 443 ssl;
-    ssl_certificate /etc/letsencrypt/live/pyeditorial.local/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/pyeditorial.local/privkey.pem;
-    include /etc/letsencrypt/options-ssl-nginx.conf;
-    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
-}
 
   server {
     if ($host = pyeditorial.local) {
