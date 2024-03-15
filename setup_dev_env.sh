@@ -16,8 +16,11 @@ update_requirements "Dockerfile" "asgiref==3.3.1" "asgiref>=3.3.2"
 update_requirements "requirements.txt" "asgiref==3.3.1" "asgiref>=3.3.2"
 
 echo "gunicorn" >> requirements.txt
+
 mkdir -p ./certbot/conf
 mkdir -p ./certbot/www
+chmod -R 777 ./certbot/conf
+chmod -R 777 ./certbot/www
 
 cat << EOF > docker-compose.yml
 version: '3.6'
@@ -43,6 +46,15 @@ services:
       POSTGRES_PASSWORD: mypassword
       POSTGRES_DB: mydatabase
 
+  certbot:
+    image: certbot/certbot
+    volumes:
+      - ./certbot/conf:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done'"
+    depends_on:
+      - nginx
+
   nginx:
     image: nginx:latest
     extra_hosts:
@@ -60,36 +72,30 @@ EOF
 
 mkdir nginx
 cat <<EOF >nginx/default.conf
-upstream web {
-    server web:8000;
-}
-
-    server {
-
-        location / {
-            resolver 127.0.0.11;
-            proxy_pass http://web;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_set_header Host $host;
-            proxy_redirect off;
-        }
-
-        location /static/ {
-            alias /static/;
-        }
-        location /media/ {
-            alias /media/;
-        }
-
-
-  server {
-    if ($host = pyeditorial.local) {
+server {
+    listen 80;
+    server_name pyeditorial.local;
+    location / {
         return 301 https://$host$request_uri;
     }
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+}
 
-        listen 80;
-        server_name pyeditorial.local;
-    return 404;
+server {
+    listen 443 ssl;
+    server_name pyeditorial.local;
+
+    ssl_certificate /etc/letsencrypt/live/pyeditorial.local/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/pyeditorial.local/privkey.pem;
+
+    location / {
+        proxy_pass http://web;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header Host $host;
+        proxy_redirect off;
+    }
 }
 EOF
 
