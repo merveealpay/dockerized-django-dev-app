@@ -28,3 +28,5 @@ To use the script, navigate to the directory containing the script and run:
 
 ```bash
 ./setup_dev_env.sh
+
+### You can access it via http://localhost:8000
